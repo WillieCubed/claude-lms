@@ -160,6 +160,7 @@ def _annotate(model: str, details: dict, default: str | None) -> str:
 
 
 _FALLBACK = object()  # sentinel: interactive picker unavailable -> use the numbered menu
+_PICKER_HEADER = "Select a model  (↑/↓ or j/k · Enter to choose · q to cancel)"
 
 
 def _key_action(key: str, selected: int, count: int) -> tuple[int, str]:
@@ -198,16 +199,73 @@ def _read_key(fd: int) -> str:
     return "\x1b"
 
 
-def _render_menu(out, models, details, default, selected, redraw) -> None:
+def _fit_terminal_line(line: str, columns: int) -> str:
+    """Keep a picker row on one terminal line so redraw cursor math stays valid."""
+    max_columns = max(columns - 1, 1)
+    if len(line) <= max_columns:
+        return line
+    if max_columns <= 3:
+        return line[:max_columns]
+    return line[: max_columns - 3] + "..."
+
+
+def _clear_menu(out, rows: int) -> None:
+    """Erase the picker block, leaving the cursor where the header started."""
+    if rows <= 0:
+        return
+    out.write(f"\x1b[{rows}A")
+    for index in range(rows):
+        out.write("\r\x1b[2K")
+        if index < rows - 1:
+            out.write("\x1b[1B")
+    if rows > 1:
+        out.write(f"\x1b[{rows - 1}A")
+
+
+def _format_menu_row(model: str, details: dict, default: str | None, selected: bool, columns: int) -> str:
+    marker = "❯ " if selected else "  "
+    line = _fit_terminal_line(f"{marker}{_annotate(model, details, default)}", columns)
+    return f"\x1b[7m{line}\x1b[0m" if selected else line
+
+
+def _rewrite_menu_row(out, row: int, rows: int, body: str) -> None:
+    """Rewrite one menu row, preserving the cursor below the menu."""
+    up = rows - row
+    out.write(f"\x1b[{up}A\r\x1b[2K{body}\x1b[{up}B\r")
+
+
+def _render_menu(out, models, details, default, selected, redraw) -> int:
+    rows = len(models) + 1
     if redraw:
-        out.write(f"\x1b[{len(models) + 1}A")  # back up to the header line
-    out.write("\r\x1b[2KSelect a model  (↑/↓ or j/k · Enter to choose · q to cancel)\n")
+        _clear_menu(out, rows)
+    columns = shutil.get_terminal_size(fallback=(80, 24)).columns
+    out.write(f"\r\x1b[2K{_fit_terminal_line(_PICKER_HEADER, columns)}\n")
     for index, model in enumerate(models):
-        marker = "❯ " if index == selected else "  "
-        line = f"{marker}{_annotate(model, details, default)}"
-        body = f"\x1b[7m{line}\x1b[0m" if index == selected else line
-        out.write(f"\r\x1b[2K{body}\n")
+        out.write(f"\r\x1b[2K{_format_menu_row(model, details, default, index == selected, columns)}\n")
     out.flush()
+    return columns
+
+
+def _update_menu_selection(out, models, details, default, previous, selected, columns) -> int:
+    current_columns = shutil.get_terminal_size(fallback=(80, 24)).columns
+    if current_columns != columns:
+        return _render_menu(out, models, details, default, selected, redraw=True)
+
+    rows = len(models) + 1
+    _rewrite_menu_row(
+        out,
+        previous + 1,
+        rows,
+        _format_menu_row(models[previous], details, default, False, columns),
+    )
+    _rewrite_menu_row(
+        out,
+        selected + 1,
+        rows,
+        _format_menu_row(models[selected], details, default, True, columns),
+    )
+    out.flush()
+    return columns
 
 
 def _interactive_pick(models, details, default):
@@ -231,7 +289,7 @@ def _interactive_pick(models, details, default):
     out.write("\x1b[?25l")  # hide cursor
     try:
         tty.setcbreak(fd)
-        _render_menu(out, models, details, default, selected, redraw=False)
+        columns = _render_menu(out, models, details, default, selected, redraw=False)
         while True:
             new_selected, action = _key_action(_read_key(fd), selected, len(models))
             if action == "select":
@@ -239,10 +297,16 @@ def _interactive_pick(models, details, default):
             if action == "cancel":
                 return None
             if action == "move":
+                previous = selected
                 selected = new_selected
-                _render_menu(out, models, details, default, selected, redraw=True)
+                columns = _update_menu_selection(
+                    out, models, details, default, previous, selected, columns
+                )
+    except KeyboardInterrupt:
+        return None
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+        _clear_menu(out, len(models) + 1)
         out.write("\x1b[?25h\r")  # restore cursor
         out.flush()
 

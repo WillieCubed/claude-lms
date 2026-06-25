@@ -1,4 +1,5 @@
 """Tests for CLI helpers that don't touch the network."""
+import io
 import os
 
 from claude_lms import cli
@@ -89,3 +90,23 @@ def test_key_action_navigation_and_wrap():
     assert cli._key_action("q", 1, 3) == (1, "cancel")
     assert cli._key_action("\x1b", 1, 3) == (1, "cancel")
     assert cli._key_action("x", 1, 3) == (1, "ignore")
+
+
+def test_fit_terminal_line_leaves_room_to_avoid_wrapping():
+    assert cli._fit_terminal_line("abcdef", 10) == "abcdef"
+    assert cli._fit_terminal_line("abcdefghij", 10) == "abcdef..."
+    assert len(cli._fit_terminal_line("abcdefghij", 10)) == 9
+
+
+def test_clear_menu_erases_rows_and_returns_to_start():
+    out = io.StringIO()
+    cli._clear_menu(out, 3)
+
+    assert out.getvalue() == "\x1b[3A\r\x1b[2K\x1b[1B\r\x1b[2K\x1b[1B\r\x1b[2K\x1b[2A"
+
+
+def test_rewrite_menu_row_preserves_cursor_below_menu():
+    out = io.StringIO()
+    cli._rewrite_menu_row(out, row=2, rows=5, body="row body")
+
+    assert out.getvalue() == "\x1b[3A\r\x1b[2Krow body\x1b[3B\r"
