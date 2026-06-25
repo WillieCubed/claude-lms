@@ -209,17 +209,20 @@ def _fit_terminal_line(line: str, columns: int) -> str:
     return line[: max_columns - 3] + "..."
 
 
+# The picker helpers share one convention: between operations the cursor rests on
+# the line just below the menu block. _render_menu leaves it there, _rewrite_menu_row
+# returns it there, and _clear_menu moves up to the header and erases downward.
+
+
+def _terminal_columns() -> int:
+    return shutil.get_terminal_size(fallback=(80, 24)).columns
+
+
 def _clear_menu(out, rows: int) -> None:
     """Erase the picker block, leaving the cursor where the header started."""
     if rows <= 0:
         return
-    out.write(f"\x1b[{rows}A")
-    for index in range(rows):
-        out.write("\r\x1b[2K")
-        if index < rows - 1:
-            out.write("\x1b[1B")
-    if rows > 1:
-        out.write(f"\x1b[{rows - 1}A")
+    out.write(f"\x1b[{rows}A\r\x1b[J")  # up to the header, then erase to end of display
 
 
 def _format_menu_row(model: str, details: dict, default: str | None, selected: bool, columns: int) -> str:
@@ -238,7 +241,7 @@ def _render_menu(out, models, details, default, selected, redraw) -> int:
     rows = len(models) + 1
     if redraw:
         _clear_menu(out, rows)
-    columns = shutil.get_terminal_size(fallback=(80, 24)).columns
+    columns = _terminal_columns()
     out.write(f"\r\x1b[2K{_fit_terminal_line(_PICKER_HEADER, columns)}\n")
     for index, model in enumerate(models):
         out.write(f"\r\x1b[2K{_format_menu_row(model, details, default, index == selected, columns)}\n")
@@ -247,7 +250,7 @@ def _render_menu(out, models, details, default, selected, redraw) -> int:
 
 
 def _update_menu_selection(out, models, details, default, previous, selected, columns) -> int:
-    current_columns = shutil.get_terminal_size(fallback=(80, 24)).columns
+    current_columns = _terminal_columns()
     if current_columns != columns:
         return _render_menu(out, models, details, default, selected, redraw=True)
 

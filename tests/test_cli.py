@@ -102,7 +102,7 @@ def test_clear_menu_erases_rows_and_returns_to_start():
     out = io.StringIO()
     cli._clear_menu(out, 3)
 
-    assert out.getvalue() == "\x1b[3A\r\x1b[2K\x1b[1B\r\x1b[2K\x1b[1B\r\x1b[2K\x1b[2A"
+    assert out.getvalue() == "\x1b[3A\r\x1b[J"
 
 
 def test_rewrite_menu_row_preserves_cursor_below_menu():
