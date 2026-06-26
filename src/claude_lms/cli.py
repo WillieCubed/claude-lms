@@ -37,6 +37,20 @@ def _get_json(url: str, timeout: float = 5.0):
         return None
 
 
+def _post_json(url: str, payload: dict, timeout: float = 600.0):
+    """POST a JSON body and return the decoded JSON response.
+
+    Unlike ``_get_json``, errors propagate so callers can tell a failed request from an
+    empty body.
+    """
+    data = json.dumps(payload).encode()
+    request = urllib.request.Request(
+        url, data=data, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode())
+
+
 # --- persistent config (the cll-managed default model) ----------------------------
 
 def _config_path() -> str:
@@ -105,6 +119,34 @@ def loaded_model(base_url: str) -> str | None:
         if detail.get("state") == "loaded":
             return mid
     return None
+
+
+def warm_up_model(base_url: str, model: str, notify) -> bool:
+    """Ensure ``model`` is loaded in LM Studio before launching Claude.
+
+    Returns ``True`` if the model is resident (already loaded, or loaded by this warmup).
+    Best-effort: on error or timeout it reports via ``notify`` and returns ``False``,
+    leaving the caller free to launch Claude and let LM Studio load it on the first request.
+    """
+    if model_details(base_url).get(model, {}).get("state") == "loaded":
+        return True
+    notify(f"cll: loading {model} into LM Studio (this can take a moment)...")
+    try:
+        # A single user message needs no normalizing, so we can hit LM Studio directly
+        # (the proxy isn't running yet). The response means the model finished loading.
+        _post_json(
+            base_url + "/v1/chat/completions",
+            {
+                "model": model,
+                "messages": [{"role": "user", "content": "ok"}],
+                "max_tokens": 1,
+                "stream": False,
+            },
+        )
+    except (urllib.error.URLError, OSError, ValueError, TimeoutError) as exc:
+        notify(f"cll: could not preload {model} ({exc}); LM Studio will load it on first use.")
+        return False
+    return True
 
 
 def ensure_lmstudio(base_url: str) -> "list[str] | None":
@@ -591,6 +633,8 @@ def main(argv: list[str] | None = None) -> int:
         model = pick_model(models, model_details(base_url), effective_default())
         if not model:
             return 1
+
+    warm_up_model(base_url, model, _eprint)
 
     upstream = urlsplit(base_url)
     server = make_server(

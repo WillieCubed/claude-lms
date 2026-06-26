@@ -152,6 +152,11 @@ Resolution order: `-m/--model` → `--pick` → `$CLL_MODEL` → saved default
 (`cll set-default`) → currently-loaded model → the only model → menu. The saved default
 lives in `~/.config/claude-lms/config.json`; `CLL_MODEL` is a one-off override.
 
+If the chosen model isn't already loaded, `cll` warms it up in LM Studio before starting
+Claude, so the first request hits a loaded model instead of waiting for a cold start. This
+is best-effort: if the warm-up fails, `cll` says so and starts Claude anyway, letting
+LM Studio load the model on the first request.
+
 ### Shell completion (turnkey)
 
 One command writes the completion and wires it into your shell rc (idempotent):

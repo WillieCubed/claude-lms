@@ -1,6 +1,7 @@
 """Tests for CLI helpers that don't touch the network."""
 import io
 import os
+import urllib.error
 
 from claude_lms import cli
 from claude_lms.cli import match_model
@@ -110,3 +111,47 @@ def test_rewrite_menu_row_preserves_cursor_below_menu():
     cli._rewrite_menu_row(out, row=2, rows=5, body="row body")
 
     assert out.getvalue() == "\x1b[3A\r\x1b[2Krow body\x1b[3B\r"
+
+
+def test_warm_up_model_skips_post_when_already_loaded(monkeypatch):
+    monkeypatch.setattr(cli, "model_details", lambda url: {"m": {"state": "loaded"}})
+    posts = []
+    monkeypatch.setattr(cli, "_post_json", lambda *a, **k: posts.append(a))
+    notes = []
+
+    assert cli.warm_up_model("http://lm", "m", notes.append) is True
+    assert posts == []
+    assert notes == []
+
+
+def test_warm_up_model_posts_warmup_when_not_loaded(monkeypatch):
+    monkeypatch.setattr(cli, "model_details", lambda url: {"m": {"state": "not-loaded"}})
+    calls = []
+
+    def fake_post(url, payload, *args, **kwargs):
+        calls.append((url, payload))
+        return {}
+
+    monkeypatch.setattr(cli, "_post_json", fake_post)
+    notes = []
+
+    assert cli.warm_up_model("http://lm", "m", notes.append) is True
+    assert len(calls) == 1
+    url, payload = calls[0]
+    assert url == "http://lm/v1/chat/completions"
+    assert payload["model"] == "m"
+    assert payload["max_tokens"] == 1
+    assert any("loading m" in note for note in notes)
+
+
+def test_warm_up_model_warns_and_continues_on_failure(monkeypatch):
+    monkeypatch.setattr(cli, "model_details", lambda url: {})
+
+    def boom(*args, **kwargs):
+        raise urllib.error.URLError("boom")
+
+    monkeypatch.setattr(cli, "_post_json", boom)
+    notes = []
+
+    assert cli.warm_up_model("http://lm", "m", notes.append) is False
+    assert any("could not preload m" in note for note in notes)
