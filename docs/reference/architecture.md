@@ -5,8 +5,8 @@ LM Studio that would otherwise reject its requests.
 
 ## The pieces
 
-- **`cll`** (`src/claude_lms/cli.py`) — the launcher. Resolves which model to use, starts
-  the proxy, and runs the `claude` CLI pointed at it.
+- **`cll`** (`src/claude_lms/cli.py`) — the launcher. Resolves which model to use, warms it
+  up in LM Studio, starts the proxy, and runs the `claude` CLI pointed at it.
 - **The normalizing proxy** (`src/claude_lms/proxy.py`) — a tiny reverse proxy between
   Claude Code and LM Studio that rewrites each request so any chat template accepts it.
 
@@ -41,7 +41,11 @@ altered, and the response is streamed through unbuffered. See the
 
 ## Lifecycle
 
-`cll` starts the proxy on an ephemeral port for the session only, runs `claude` as a
+Before starting the proxy, `cll` warms up the chosen model: if it isn't already loaded, a
+single minimal request asks LM Studio to load it, so the first real request doesn't pay the
+cold-start load. The warm-up is best-effort; if it fails, `cll` notes it and continues.
+
+`cll` then starts the proxy on an ephemeral port for the session only, runs `claude` as a
 child process, and tears the proxy down on exit. Nothing is left running, and concurrent
 `cll` sessions get their own ports, so they never collide. The proxy runs in-process and
 shares the terminal with the Claude Code TUI, so it never writes to stderr — diagnostics

@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- `cll` warms up the selected model in LM Studio before launching Claude. If the model
+  isn't already loaded, `cll` sends one minimal request and waits, so Claude's first
+  request hits a loaded model instead of a cold start. Best-effort: if the warm-up fails,
+  `cll` says so and starts Claude anyway, letting LM Studio load the model on first use.
+
+### Changed
+
+- The interactive `--pick` menu is smoother. Long model names are truncated to fit the
+  terminal instead of wrapping, only the rows that change are repainted as you move the
+  selection, the menu is cleared on exit, and Ctrl-C cancels cleanly.
+
 ## [0.3.0]
 
 ### Added
