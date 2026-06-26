@@ -18,6 +18,14 @@ All notable changes to this project are documented here. The format is based on
 - The interactive `--pick` menu is smoother. Long model names are truncated to fit the
   terminal instead of wrapping, only the rows that change are repainted as you move the
   selection, the menu is cleared on exit, and Ctrl-C cancels cleanly.
+- `cll doctor` now lists every model LM Studio has loaded (it can hold several at once) and
+  marks the loaded ones in the available-models list, instead of showing only one.
+- When several models are loaded and nothing else selects one, `cll` shows the picker
+  instead of silently guessing which loaded model to use. With exactly one loaded, it still
+  launches straight into it.
+- Clearer messages: "running but no models" is distinguished from "not reachable", a missing
+  saved default explains it is your saved default and points at `cll set-default`, and the
+  warm-up prints a short confirmation (with elapsed time) once the model is ready.
 
 ## [0.3.0]
 

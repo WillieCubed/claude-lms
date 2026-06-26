@@ -142,6 +142,7 @@ def test_warm_up_model_posts_warmup_when_not_loaded(monkeypatch):
     assert payload["model"] == "m"
     assert payload["max_tokens"] == 1
     assert any("loading m" in note for note in notes)
+    assert any("m ready" in note for note in notes)
 
 
 def test_warm_up_model_warns_and_continues_on_failure(monkeypatch):
@@ -155,3 +156,57 @@ def test_warm_up_model_warns_and_continues_on_failure(monkeypatch):
 
     assert cli.warm_up_model("http://lm", "m", notes.append) is False
     assert any("could not preload m" in note for note in notes)
+
+
+def test_loaded_models_returns_every_loaded_id(monkeypatch):
+    monkeypatch.setattr(
+        cli,
+        "model_details",
+        lambda url: {
+            "a": {"state": "loaded"},
+            "b": {"state": "not-loaded"},
+            "c": {"state": "loaded"},
+        },
+    )
+    assert cli.loaded_models("http://lm") == ["a", "c"]
+
+
+def test_loaded_models_empty_when_none_loaded(monkeypatch):
+    monkeypatch.setattr(cli, "model_details", lambda url: {"a": {"state": "not-loaded"}})
+    assert cli.loaded_models("http://lm") == []
+
+
+def test_server_reachable_reflects_get_json(monkeypatch):
+    monkeypatch.setattr(cli, "_get_json", lambda url, **k: {"data": []})
+    assert cli.server_reachable("http://lm") is True
+    monkeypatch.setattr(cli, "_get_json", lambda url, **k: None)
+    assert cli.server_reachable("http://lm") is False
+
+
+def test_no_models_message_distinguishes_empty_from_down(monkeypatch):
+    monkeypatch.setattr(cli, "server_reachable", lambda url: True)
+    assert "has no chat models" in cli.no_models_message("http://lm")
+    monkeypatch.setattr(cli, "server_reachable", lambda url: False)
+    assert "not reachable" in cli.no_models_message("http://lm")
+
+
+def test_doctor_lists_every_loaded_model(monkeypatch, capsys):
+    monkeypatch.setattr(cli.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(cli, "list_models", lambda url: ["a", "b", "c"])
+    monkeypatch.setattr(
+        cli,
+        "model_details",
+        lambda url: {
+            "a": {"state": "loaded"},
+            "b": {"state": "not-loaded"},
+            "c": {"state": "loaded"},
+        },
+    )
+    monkeypatch.setattr(cli, "configured_default", lambda: None)
+    monkeypatch.delenv("CLL_MODEL", raising=False)
+
+    cli.run_doctor("http://lm")
+    err = capsys.readouterr().err
+    assert "loaded models" in err
+    assert "a, c" in err
+    assert "a  (loaded)" in err and "c  (loaded)" in err

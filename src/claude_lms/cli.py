@@ -15,6 +15,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
@@ -49,6 +50,28 @@ def _post_json(url: str, payload: dict, timeout: float = 600.0):
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode())
+
+
+def server_reachable(base_url: str) -> bool:
+    """True if LM Studio answers at all, even when it has no models available."""
+    return _get_json(base_url.rstrip("/") + "/v1/models") is not None
+
+
+def no_models_message(base_url: str) -> str:
+    """The message to show when no chat models are available.
+
+    Distinguishes a server that is up but empty from one that isn't running, so the user
+    knows whether to download a model or start LM Studio.
+    """
+    if server_reachable(base_url):
+        return (
+            f"cll: LM Studio is running at {base_url} but has no chat models available.\n"
+            "     Download or load a model in LM Studio, then try again."
+        )
+    return (
+        f"cll: LM Studio is not reachable at {base_url}.\n"
+        "     Start its local server (e.g. `lms server start`) and make sure a model is available."
+    )
 
 
 # --- persistent config (the cll-managed default model) ----------------------------
@@ -113,12 +136,11 @@ def model_details(base_url: str) -> dict:
     return details
 
 
-def loaded_model(base_url: str) -> str | None:
-    """Best-effort: the id of the model currently loaded in LM Studio, if any."""
-    for mid, detail in model_details(base_url).items():
-        if detail.get("state") == "loaded":
-            return mid
-    return None
+def loaded_models(base_url: str) -> list[str]:
+    """The ids of every model currently loaded in LM Studio (it can hold several)."""
+    return [
+        mid for mid, detail in model_details(base_url).items() if detail.get("state") == "loaded"
+    ]
 
 
 def warm_up_model(base_url: str, model: str, notify) -> bool:
@@ -131,6 +153,7 @@ def warm_up_model(base_url: str, model: str, notify) -> bool:
     if model_details(base_url).get(model, {}).get("state") == "loaded":
         return True
     notify(f"cll: loading {model} into LM Studio (this can take a moment)...")
+    started = time.monotonic()
     try:
         # A single user message needs no normalizing, so we can hit LM Studio directly
         # (the proxy isn't running yet). The response means the model finished loading.
@@ -146,6 +169,8 @@ def warm_up_model(base_url: str, model: str, notify) -> bool:
     except (OSError, ValueError) as exc:  # OSError covers URLError and socket timeouts
         notify(f"cll: could not preload {model} ({exc}); LM Studio will load it on first use.")
         return False
+    elapsed = time.monotonic() - started
+    notify(f"cll: {model} ready{f' ({elapsed:.0f}s)' if elapsed >= 1 else ''}.")
     return True
 
 
@@ -395,8 +420,9 @@ def resolve_model(args, base_url: str, models: list[str]) -> str | None:
 
     1. ``-m/--model`` (exact id or unique substring)  2. ``--pick`` menu
     3. ``$CLL_MODEL`` (one-off env override)  4. the persisted default
-    (``cll set-default``)  5. the model currently loaded in LM Studio
-    6. the only model, if there is exactly one  7. otherwise an interactive menu.
+    (``cll set-default``)  5. the loaded model when exactly one is resident (if several
+    are loaded on a TTY, a menu, so we don't guess)  6. the only model, if there is
+    exactly one  7. otherwise an interactive menu.
     """
     def menu() -> str | None:
         return pick_model(models, model_details(base_url), effective_default())
@@ -420,9 +446,15 @@ def resolve_model(args, base_url: str, models: list[str]) -> str | None:
         return os.environ["CLL_MODEL"]
     if configured_default():
         return configured_default()
-    current = loaded_model(base_url)
-    if current:
-        return current
+    loaded = loaded_models(base_url)
+    if len(loaded) == 1:
+        return loaded[0]
+    if len(loaded) > 1 and sys.stdin.isatty():
+        # Several models are resident; don't silently guess. Let the user choose
+        # (loaded ones are marked in the menu). cll set-default pins one for next time.
+        return menu()
+    if loaded:
+        return loaded[0]
     if len(models) == 1:
         return models[0]
     return menu()
@@ -434,7 +466,7 @@ def print_models_table(base_url: str) -> int:
     """Print a human-readable table of available models and exit."""
     models = ensure_lmstudio(base_url)
     if models is None:
-        _eprint(f"cll: LM Studio is not reachable at {base_url}.")
+        _eprint(no_models_message(base_url))
         return 1
     details = model_details(base_url)
     default = effective_default()
@@ -459,7 +491,7 @@ def run_doctor(base_url: str) -> int:
     lms = shutil.which("lms")
     models = list_models(base_url)
     reachable = bool(models)
-    loaded = loaded_model(base_url)
+    loaded = loaded_models(base_url)
     env_default = os.environ.get("CLL_MODEL")
     cfg_default = configured_default()
 
@@ -469,7 +501,8 @@ def run_doctor(base_url: str) -> int:
         (reachable, f"LM Studio server      {'reachable at ' + base_url if reachable else 'NOT reachable at ' + base_url}"),
     ]
     if loaded:
-        checks.append((True, f"loaded model          {loaded}"))
+        label = "loaded models" if len(loaded) > 1 else "loaded model"
+        checks.append((True, f"{label:<22}{', '.join(loaded)}"))
     if env_default:
         checks.append((True, f"CLL_MODEL (env)       {env_default}"))
     if cfg_default:
@@ -478,9 +511,10 @@ def run_doctor(base_url: str) -> int:
     for passed, message in checks:
         _eprint(f"  {'✓' if passed else '✗'} {message}")
     if models:
+        loaded_set = set(loaded)
         _eprint(f"  · available models    {len(models)}")
         for model in models:
-            _eprint(f"      {model}")
+            _eprint(f"      {model}{'  (loaded)' if model in loaded_set else ''}")
 
     ready = all(passed for passed, _ in checks)
     _eprint("")
@@ -557,7 +591,7 @@ def _run_command(command: str, rest: list[str]) -> int:
     if command == "list-models":
         models = ensure_lmstudio(base_url)
         if models is None:
-            _eprint(f"cll: LM Studio is not reachable at {base_url}.")
+            _eprint(no_models_message(base_url))
             return 1
         for model in models:
             print(model)
@@ -616,11 +650,7 @@ def main(argv: list[str] | None = None) -> int:
 
     models = ensure_lmstudio(base_url)
     if models is None:
-        _eprint(
-            f"cll: LM Studio is not reachable at {base_url}.\n"
-            "     Start its local server (e.g. `lms server start`) and make sure a "
-            "model is available."
-        )
+        _eprint(no_models_message(base_url))
         return 1
 
     auto_resolved = not args.model and not args.pick
@@ -629,7 +659,15 @@ def main(argv: list[str] | None = None) -> int:
         _eprint("cll: no model selected.")
         return 1
     if models and model not in models:
-        _eprint(f"cll: model '{model}' is not available in LM Studio.")
+        if model == configured_default():
+            _eprint(
+                f"cll: your saved default '{model}' isn't available in LM Studio right now.\n"
+                "     Pick another below, or run `cll set-default <model>` to change it."
+            )
+        elif model == os.environ.get("CLL_MODEL"):
+            _eprint(f"cll: CLL_MODEL '{model}' isn't available in LM Studio. Pick another below.")
+        else:
+            _eprint(f"cll: model '{model}' isn't available in LM Studio. Pick another below.")
         model = pick_model(models, model_details(base_url), effective_default())
         if not model:
             return 1
