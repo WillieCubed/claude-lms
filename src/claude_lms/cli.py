@@ -40,12 +40,40 @@ def _color_enabled(stream) -> bool:
 
 
 def _paint(text: str, *names: str, stream=None) -> str:
-    """Wrap ``text`` in ANSI styles, or return it unchanged when color is off."""
+    """Wrap ``text`` in ANSI styles, or return it unchanged when color is off.
+
+    Each name is either a key in ``_SGR`` or a raw SGR parameter string (e.g. a 256-color
+    ``"38;5;208"``), which passes through unchanged.
+    """
     stream = stream or sys.stderr
     if not _color_enabled(stream):
         return text
-    codes = ";".join(_SGR[name] for name in names)
+    codes = ";".join(_SGR.get(name, name) for name in names)
     return f"\x1b[{codes}m{text}\x1b[0m"
+
+
+# 256-color hues for distinguishing model vendors, chosen to avoid the colors that carry
+# meaning elsewhere: cyan (selection), green (loaded), yellow (default), red (errors).
+_VENDOR_256 = (33, 141, 170, 208, 178, 211)  # blue, purple, magenta, orange, gold, pink
+
+
+def _vendor_color(model: str) -> str:
+    """A stable 256-color SGR code for a model, keyed on its vendor/family.
+
+    Groups by the leading letters of the namespace (``qwen/qwen3.6`` and
+    ``qwen2.5-0.5b`` both map to ``qwen``), so a family shares one color across runs.
+    """
+    head = model.split("/", 1)[0]
+    key = ""
+    for char in head:
+        if not char.isalpha():
+            break
+        key += char
+    key = (key or head).lower()
+    digest = 0
+    for char in key:  # polynomial hash: stable across runs and spreads better than a sum
+        digest = (digest * 31 + ord(char)) & 0xFFFFFFFF
+    return f"38;5;{_VENDOR_256[digest % len(_VENDOR_256)]}"
 
 
 def _say_error(msg: str) -> None:
@@ -342,16 +370,23 @@ def _format_menu_row(model: str, details: dict, default: str | None, selected: b
         return f"\x1b[7m{line}\x1b[0m" if selected else line
 
     # Styled: the plain row fits, so painting segments (same visible width) is safe.
+    # Each property gets a consistent color so the menu reads column by column.
     detail = details.get(model, {})
-    bits = [b for b in (detail.get("arch"), detail.get("quant")) if b]
     pointer = _paint("❯ ", "cyan", "bold") if selected else "  "
-    name = _paint(model, "cyan", "bold") if selected else model
-    meta = _paint(f"  [{' · '.join(bits)}]", "dim") if bits else ""
+    name = _paint(model, "cyan", "bold") if selected else _paint(model, _vendor_color(model))
+
+    props = []
+    if detail.get("arch"):
+        props.append(_paint(detail["arch"], "38;5;109"))  # steel blue
+    if detail.get("quant"):
+        props.append(_paint(detail["quant"], "38;5;173"))  # copper
+    meta = f"{_paint('  [', 'dim')}{_paint(' · ', 'dim').join(props)}{_paint(']', 'dim')}" if props else ""
+
     marks = []
     if detail.get("state") == "loaded":
         marks.append(_paint("loaded", "green"))
     if model == default:
-        marks.append(_paint("default", "cyan"))
+        marks.append(_paint("default", "yellow"))
     tail = f"{_paint('  (', 'dim')}{_paint(', ', 'dim').join(marks)}{_paint(')', 'dim')}" if marks else ""
     return f"{pointer}{name}{meta}{tail}"
 

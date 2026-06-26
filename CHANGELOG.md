@@ -8,10 +8,11 @@ All notable changes to this project are documented here. The format is based on
 
 ### Changed
 
-- The interactive `--pick` menu is colorized: a cyan pointer and name mark the selected
-  row, model metadata is dimmed, and the `loaded`/`default` flags are green and cyan. It
-  honors `NO_COLOR` and falls back to the previous reverse-video highlight when color is
-  off or the row has to be truncated.
+- The interactive `--pick` menu is colorized, with each property its own color so the list
+  reads column by column: model names tinted by vendor/family (a family shares one hue),
+  the architecture and quantization in distinct colors, `loaded` in green and `default` in
+  yellow, and a cyan pointer and name on the selected row. It honors `NO_COLOR` and falls
+  back to the reverse-video highlight when color is off or a row has to be truncated.
 
 ## [0.4.0]
 
