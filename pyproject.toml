@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "claude-lms"
-version = "0.3.0"
+version = "0.4.0"
 description = "Run Claude Code against local models in LM Studio — fixes the 'System message must be at the beginning' chat-template error (Qwen and other strict templates)."
 readme = "README.md"
 requires-python = ">=3.8"
