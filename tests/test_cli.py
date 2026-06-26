@@ -187,6 +187,32 @@ def test_paint_wraps_with_sgr_codes_when_enabled(monkeypatch):
     assert cli._paint("hi", "red", "bold") == "\x1b[31;1mhi\x1b[0m"
 
 
+def test_format_menu_row_uses_reverse_video_without_color(monkeypatch):
+    monkeypatch.setattr(cli, "_color_enabled", lambda stream: False)
+    row = cli._format_menu_row("qwen", {}, None, selected=True, columns=80)
+    assert row.startswith("\x1b[7m") and row.endswith("\x1b[0m")
+    assert "❯ qwen" in row
+
+
+def test_format_menu_row_colors_segments_when_enabled(monkeypatch):
+    monkeypatch.setattr(cli, "_color_enabled", lambda stream: True)
+    details = {"qwen": {"arch": "qwen3", "quant": "6bit", "state": "loaded"}}
+    selected = cli._format_menu_row("qwen", details, "qwen", selected=True, columns=80)
+    assert "\x1b[36;1m❯ \x1b[0m" in selected  # cyan+bold pointer
+    assert "\x1b[32mloaded\x1b[0m" in selected  # green loaded mark
+    assert "\x1b[36mdefault\x1b[0m" in selected  # cyan default mark
+    # No reverse-video block in the colored path.
+    assert "\x1b[7m" not in selected
+
+
+def test_format_menu_row_falls_back_to_plain_when_too_narrow(monkeypatch):
+    monkeypatch.setattr(cli, "_color_enabled", lambda stream: True)
+    # A 10-column terminal forces truncation, so the safe plain path runs.
+    row = cli._format_menu_row("a-very-long-model-name", {}, None, selected=False, columns=10)
+    assert row.endswith("...")
+    assert "\x1b[36m" not in row
+
+
 def test_loaded_models_returns_every_loaded_id(monkeypatch):
     monkeypatch.setattr(
         cli,

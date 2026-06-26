@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- The interactive `--pick` menu is colorized: a cyan pointer and name mark the selected
+  row, model metadata is dimmed, and the `loaded`/`default` flags are green and cyan. It
+  honors `NO_COLOR` and falls back to the previous reverse-video highlight when color is
+  off or the row has to be truncated.
+
 ## [0.4.0]
 
 ### Added

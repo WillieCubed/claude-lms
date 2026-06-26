@@ -264,7 +264,9 @@ def _annotate(model: str, details: dict, default: str | None) -> str:
 
 
 _FALLBACK = object()  # sentinel: interactive picker unavailable -> use the numbered menu
-_PICKER_HEADER = "Select a model  (↑/↓ or j/k · Enter to choose · q to cancel)"
+_PICKER_TITLE = "Select a model"
+_PICKER_HINT = "  (↑/↓ or j/k · Enter to choose · q to cancel)"
+_PICKER_HEADER = _PICKER_TITLE + _PICKER_HINT
 
 
 def _key_action(key: str, selected: int, count: int) -> tuple[int, str]:
@@ -331,8 +333,27 @@ def _clear_menu(out, rows: int) -> None:
 
 def _format_menu_row(model: str, details: dict, default: str | None, selected: bool, columns: int) -> str:
     marker = "❯ " if selected else "  "
-    line = _fit_terminal_line(f"{marker}{_annotate(model, details, default)}", columns)
-    return f"\x1b[7m{line}\x1b[0m" if selected else line
+    plain = f"{marker}{_annotate(model, details, default)}"
+
+    # No color (or NO_COLOR), or the row needs truncating: keep the safe reverse-video
+    # rendering, which only ever wraps already-measured plain text.
+    if not _color_enabled(sys.stderr) or len(plain) > max(columns - 1, 1):
+        line = _fit_terminal_line(plain, columns)
+        return f"\x1b[7m{line}\x1b[0m" if selected else line
+
+    # Styled: the plain row fits, so painting segments (same visible width) is safe.
+    detail = details.get(model, {})
+    bits = [b for b in (detail.get("arch"), detail.get("quant")) if b]
+    pointer = _paint("❯ ", "cyan", "bold") if selected else "  "
+    name = _paint(model, "cyan", "bold") if selected else model
+    meta = _paint(f"  [{' · '.join(bits)}]", "dim") if bits else ""
+    marks = []
+    if detail.get("state") == "loaded":
+        marks.append(_paint("loaded", "green"))
+    if model == default:
+        marks.append(_paint("default", "cyan"))
+    tail = f"{_paint('  (', 'dim')}{_paint(', ', 'dim').join(marks)}{_paint(')', 'dim')}" if marks else ""
+    return f"{pointer}{name}{meta}{tail}"
 
 
 def _rewrite_menu_row(out, row: int, rows: int, body: str) -> None:
@@ -346,7 +367,11 @@ def _render_menu(out, models, details, default, selected, redraw) -> int:
     if redraw:
         _clear_menu(out, rows)
     columns = _terminal_columns()
-    out.write(f"\r\x1b[2K{_fit_terminal_line(_PICKER_HEADER, columns)}\n")
+    if _color_enabled(sys.stderr) and len(_PICKER_HEADER) <= max(columns - 1, 1):
+        header = _paint(_PICKER_TITLE, "bold") + _paint(_PICKER_HINT, "dim")
+    else:
+        header = _fit_terminal_line(_PICKER_HEADER, columns)
+    out.write(f"\r\x1b[2K{header}\n")
     for index, model in enumerate(models):
         out.write(f"\r\x1b[2K{_format_menu_row(model, details, default, index == selected, columns)}\n")
     out.flush()
