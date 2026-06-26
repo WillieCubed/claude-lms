@@ -158,6 +158,35 @@ def test_warm_up_model_warns_and_continues_on_failure(monkeypatch):
     assert any("could not preload m" in note for note in notes)
 
 
+class _Stream:
+    def __init__(self, tty):
+        self._tty = tty
+
+    def isatty(self):
+        return self._tty
+
+
+def test_color_enabled_requires_tty_and_unset_no_color(monkeypatch):
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    assert cli._color_enabled(_Stream(tty=True)) is True
+    assert cli._color_enabled(_Stream(tty=False)) is False
+
+
+def test_color_enabled_respects_no_color_even_when_empty(monkeypatch):
+    monkeypatch.setenv("NO_COLOR", "")  # presence alone disables, per the spec
+    assert cli._color_enabled(_Stream(tty=True)) is False
+
+
+def test_paint_is_a_noop_without_color(monkeypatch):
+    monkeypatch.setattr(cli, "_color_enabled", lambda stream: False)
+    assert cli._paint("hi", "red", "bold") == "hi"
+
+
+def test_paint_wraps_with_sgr_codes_when_enabled(monkeypatch):
+    monkeypatch.setattr(cli, "_color_enabled", lambda stream: True)
+    assert cli._paint("hi", "red", "bold") == "\x1b[31;1mhi\x1b[0m"
+
+
 def test_loaded_models_returns_every_loaded_id(monkeypatch):
     monkeypatch.setattr(
         cli,

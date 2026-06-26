@@ -30,6 +30,40 @@ def _eprint(*args) -> None:
     print(*args, file=sys.stderr)
 
 
+_SGR = {"red": "31", "green": "32", "yellow": "33", "cyan": "36", "dim": "2", "bold": "1"}
+
+
+def _color_enabled(stream) -> bool:
+    """True when ``stream`` is a terminal and the user hasn't set ``NO_COLOR``."""
+    # NO_COLOR (https://no-color.org): any value, including empty, disables color.
+    return stream.isatty() and os.environ.get("NO_COLOR") is None
+
+
+def _paint(text: str, *names: str, stream=None) -> str:
+    """Wrap ``text`` in ANSI styles, or return it unchanged when color is off."""
+    stream = stream or sys.stderr
+    if not _color_enabled(stream):
+        return text
+    codes = ";".join(_SGR[name] for name in names)
+    return f"\x1b[{codes}m{text}\x1b[0m"
+
+
+def _say_error(msg: str) -> None:
+    _eprint(_paint(msg, "red"))
+
+
+def _say_warn(msg: str) -> None:
+    _eprint(_paint(msg, "yellow"))
+
+
+def _say_ok(msg: str) -> None:
+    _eprint(_paint(msg, "green"))
+
+
+def _say_dim(msg: str) -> None:
+    _eprint(_paint(msg, "dim"))
+
+
 def _get_json(url: str, timeout: float = 5.0):
     try:
         with urllib.request.urlopen(url, timeout=timeout) as response:
@@ -152,7 +186,7 @@ def warm_up_model(base_url: str, model: str, notify) -> bool:
     """
     if model_details(base_url).get(model, {}).get("state") == "loaded":
         return True
-    notify(f"cll: loading {model} into LM Studio (this can take a moment)...")
+    notify(_paint(f"cll: loading {model} into LM Studio (this can take a moment)...", "yellow"))
     started = time.monotonic()
     try:
         # A single user message needs no normalizing, so we can hit LM Studio directly
@@ -167,10 +201,13 @@ def warm_up_model(base_url: str, model: str, notify) -> bool:
             },
         )
     except (OSError, ValueError) as exc:  # OSError covers URLError and socket timeouts
-        notify(f"cll: could not preload {model} ({exc}); LM Studio will load it on first use.")
+        notify(_paint(
+            f"cll: could not preload {model} ({exc}); LM Studio will load it on first use.",
+            "yellow",
+        ))
         return False
     elapsed = time.monotonic() - started
-    notify(f"cll: {model} ready{f' ({elapsed:.0f}s)' if elapsed >= 1 else ''}.")
+    notify(_paint(f"cll: {model} ready{f' ({elapsed:.0f}s)' if elapsed >= 1 else ''}.", "green"))
     return True
 
 
@@ -395,7 +432,7 @@ def _numbered_pick(models, details, default):
             return None
         if choice.isdigit() and 1 <= int(choice) <= len(models):
             return models[int(choice) - 1]
-        _eprint("Invalid selection.")
+        _say_error("Invalid selection.")
 
 
 def pick_model(
@@ -466,7 +503,7 @@ def print_models_table(base_url: str) -> int:
     """Print a human-readable table of available models and exit."""
     models = ensure_lmstudio(base_url)
     if models is None:
-        _eprint(no_models_message(base_url))
+        _say_error(no_models_message(base_url))
         return 1
     details = model_details(base_url)
     default = effective_default()
@@ -475,9 +512,9 @@ def print_models_table(base_url: str) -> int:
         detail = details.get(model, {})
         flags = []
         if detail.get("state") == "loaded":
-            flags.append("loaded")
+            flags.append(_paint("loaded", "green", stream=sys.stdout))
         if model == default:
-            flags.append("default")
+            flags.append(_paint("default", "cyan", stream=sys.stdout))
         print(
             f"{model:36} {(detail.get('arch') or '?'):12} "
             f"{(detail.get('quant') or '?'):9} {' '.join(flags)}".rstrip()
@@ -509,16 +546,21 @@ def run_doctor(base_url: str) -> int:
         checks.append((True, f"default (config)      {cfg_default}"))
 
     for passed, message in checks:
-        _eprint(f"  {'✓' if passed else '✗'} {message}")
+        mark = _paint("✓", "green") if passed else _paint("✗", "red")
+        _eprint(f"  {mark} {message}")
     if models:
         loaded_set = set(loaded)
         _eprint(f"  · available models    {len(models)}")
         for model in models:
-            _eprint(f"      {model}{'  (loaded)' if model in loaded_set else ''}")
+            tag = _paint("  (loaded)", "green") if model in loaded_set else ""
+            _eprint(f"      {model}{tag}")
 
     ready = all(passed for passed, _ in checks)
     _eprint("")
-    _eprint("cll: ready." if ready else "cll: not ready — resolve the ✗ items above.")
+    if ready:
+        _say_ok("cll: ready.")
+    else:
+        _say_error("cll: not ready — resolve the ✗ items above.")
     return 0 if ready else 1
 
 
@@ -545,6 +587,7 @@ environment:
   CLL_MODEL        one-off default-model override (beats the saved default)
   LM_STUDIO_URL    LM Studio base URL (default http://localhost:1234)
   CLL_AUTH_TOKEN   dummy auth token sent to the endpoint (default lm-studio)
+  NO_COLOR         set to disable colored output
 """
 
 
@@ -591,7 +634,7 @@ def _run_command(command: str, rest: list[str]) -> int:
     if command == "list-models":
         models = ensure_lmstudio(base_url)
         if models is None:
-            _eprint(no_models_message(base_url))
+            _say_error(no_models_message(base_url))
             return 1
         for model in models:
             print(model)
@@ -600,22 +643,22 @@ def _run_command(command: str, rest: list[str]) -> int:
         return run_doctor(base_url)
     if command == "set-default":
         if not rest:
-            _eprint("cll: 'set-default' needs a model id, e.g. cll set-default qwen/qwen3.6-27b")
+            _say_error("cll: 'set-default' needs a model id, e.g. cll set-default qwen/qwen3.6-27b")
             return 1
         save_config({**load_config(), "default_model": rest[0]})
-        _eprint(f"cll: default model set to '{rest[0]}'  ({_config_path()})")
+        _say_ok(f"cll: default model set to '{rest[0]}'  ({_config_path()})")
         return 0
     if command == "clear-default":
         config = load_config()
         config.pop("default_model", None)
         save_config(config)
-        _eprint("cll: saved default cleared")
+        _say_ok("cll: saved default cleared")
         return 0
     if command == "install-completion":
         uninstall = any(token in ("--uninstall", "-u") for token in rest)
         shell = next((t for t in rest if not t.startswith("-")), None) or completions.detect_shell()
         if shell not in ("zsh", "bash"):
-            _eprint(
+            _say_error(
                 f"cll: couldn't detect a supported shell (got {shell!r}).\n"
                 "     Run: cll install-completion zsh   (or bash, plus --uninstall to remove)"
             )
@@ -623,10 +666,10 @@ def _run_command(command: str, rest: list[str]) -> int:
         for line in (completions.uninstall if uninstall else completions.install)(shell):
             _eprint(f"cll: {line}")
         if uninstall:
-            _eprint(f"cll: {shell} completion removed — restart your shell (e.g. `exec {shell}`).")
+            _say_ok(f"cll: {shell} completion removed — restart your shell (e.g. `exec {shell}`).")
         else:
-            _eprint(f"cll: {shell} completion installed — restart your shell (e.g. `exec {shell}`).")
-            _eprint("cll: (remove later with: cll install-completion --uninstall)")
+            _say_ok(f"cll: {shell} completion installed — restart your shell (e.g. `exec {shell}`).")
+            _say_dim("cll: (remove later with: cll install-completion --uninstall)")
         return 0
     return 2  # unreachable: command was validated against COMMANDS
 
@@ -642,7 +685,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # --- launch claude ---
     if shutil.which("claude") is None:
-        _eprint(
+        _say_error(
             "cll: 'claude' (Claude Code) not found on PATH.\n"
             "     Install it from https://claude.com/claude-code"
         )
@@ -650,24 +693,24 @@ def main(argv: list[str] | None = None) -> int:
 
     models = ensure_lmstudio(base_url)
     if models is None:
-        _eprint(no_models_message(base_url))
+        _say_error(no_models_message(base_url))
         return 1
 
     auto_resolved = not args.model and not args.pick
     model = resolve_model(args, base_url, models)
     if not model:
-        _eprint("cll: no model selected.")
+        _say_error("cll: no model selected.")
         return 1
     if models and model not in models:
         if model == configured_default():
-            _eprint(
+            _say_warn(
                 f"cll: your saved default '{model}' isn't available in LM Studio right now.\n"
                 "     Pick another below, or run `cll set-default <model>` to change it."
             )
         elif model == os.environ.get("CLL_MODEL"):
-            _eprint(f"cll: CLL_MODEL '{model}' isn't available in LM Studio. Pick another below.")
+            _say_warn(f"cll: CLL_MODEL '{model}' isn't available in LM Studio. Pick another below.")
         else:
-            _eprint(f"cll: model '{model}' isn't available in LM Studio. Pick another below.")
+            _say_warn(f"cll: model '{model}' isn't available in LM Studio. Pick another below.")
         model = pick_model(models, model_details(base_url), effective_default())
         if not model:
             return 1
@@ -696,9 +739,12 @@ def main(argv: list[str] | None = None) -> int:
     # Don't let a stored cloud key shadow the local endpoint.
     env.pop("ANTHROPIC_API_KEY", None)
 
-    _eprint(f"cll: Claude Code -> {model}  via LM Studio {base_url}  (normalizer {proxy_url})")
+    _eprint(
+        f"cll: Claude Code -> {_paint(model, 'cyan', 'bold')}  via LM Studio {base_url}  "
+        f"{_paint(f'(normalizer {proxy_url})', 'dim')}"
+    )
     if auto_resolved and len(models) > 1:
-        _eprint("cll: (cll --pick to choose another · cll set-default to pin one)")
+        _say_dim("cll: (cll --pick to choose another · cll set-default to pin one)")
 
     # Let the child own terminal signals (Ctrl-C); keep the proxy alive until it exits.
     previous = signal.getsignal(signal.SIGINT)

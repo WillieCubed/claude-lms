@@ -12,6 +12,9 @@ All notable changes to this project are documented here. The format is based on
   isn't already loaded, `cll` sends one minimal request and waits, so Claude's first
   request hits a loaded model instead of a cold start. Best-effort: if the warm-up fails,
   `cll` says so and starts Claude anyway, letting LM Studio load the model on first use.
+- Colored status output: errors in red, warnings in yellow, successes in green, and the
+  loaded/default flags in `cll models` and `cll doctor` highlighted. Color is only used
+  when writing to a terminal and is disabled by the `NO_COLOR` environment variable.
 
 ### Changed
 

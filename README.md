@@ -161,6 +161,10 @@ Claude, so the first request hits a loaded model instead of waiting for a cold s
 is best-effort: if the warm-up fails, `cll` says so and starts Claude anyway, letting
 LM Studio load the model on the first request.
 
+`cll` colors its status messages when writing to a terminal (errors red, warnings yellow,
+successes green). Set `NO_COLOR` to turn it off; piped or redirected output is never
+colored.
+
 ### Shell completion (turnkey)
 
 One command writes the completion and wires it into your shell rc (idempotent):
