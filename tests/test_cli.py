@@ -1,6 +1,7 @@
 """Tests for CLI helpers that don't touch the network."""
 import io
 import os
+import re
 import urllib.error
 
 from claude_lms import cli
@@ -220,12 +221,23 @@ def test_vendor_color_is_stable_and_groups_a_family():
     assert cli._vendor_color("google/gemma-4-12b").startswith("38;5;")
 
 
-def test_format_menu_row_falls_back_to_plain_when_too_narrow(monkeypatch):
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _visible(text: str) -> str:
+    return _ANSI.sub("", text)
+
+
+def test_format_menu_row_truncation_keeps_color_and_width(monkeypatch):
     monkeypatch.setattr(cli, "_color_enabled", lambda stream: True)
-    # A 10-column terminal forces truncation, so the safe plain path runs.
-    row = cli._format_menu_row("a-very-long-model-name", {}, None, selected=False, columns=10)
-    assert row.endswith("...")
-    assert "\x1b[36m" not in row
+    model = "qwen/a-very-long-model-name-that-will-not-fit"
+    details = {model: {"arch": "qwen3", "quant": "6bit"}}
+    row = cli._format_menu_row(model, details, None, selected=False, columns=20)
+    visible = _visible(row)
+    assert len(visible) <= 19  # within columns - 1, so the row can't wrap
+    assert visible.endswith("...")
+    assert f"\x1b[{cli._vendor_color(model)}m" in row  # still colored, not flattened
+    assert row.endswith("\x1b[0m")  # closed cleanly, no color bleeds past the row
 
 
 def test_loaded_models_returns_every_loaded_id(monkeypatch):

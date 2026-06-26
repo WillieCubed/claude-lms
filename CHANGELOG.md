@@ -11,8 +11,9 @@ All notable changes to this project are documented here. The format is based on
 - The interactive `--pick` menu is colorized, with each property its own color so the list
   reads column by column: model names tinted by vendor/family (a family shares one hue),
   the architecture and quantization in distinct colors, `loaded` in green and `default` in
-  yellow, and a cyan pointer and name on the selected row. It honors `NO_COLOR` and falls
-  back to the reverse-video highlight when color is off or a row has to be truncated.
+  yellow, and a cyan pointer and name on the selected row. Truncating a long row keeps the
+  coloring intact (no color bleeds past the row). It honors `NO_COLOR`, falling back to the
+  reverse-video highlight when color is off.
 
 ## [0.4.0]
 

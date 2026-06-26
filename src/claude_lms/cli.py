@@ -359,36 +359,74 @@ def _clear_menu(out, rows: int) -> None:
     out.write(f"\x1b[{rows}A\r\x1b[J")  # up to the header, then erase to end of display
 
 
-def _format_menu_row(model: str, details: dict, default: str | None, selected: bool, columns: int) -> str:
-    marker = "❯ " if selected else "  "
-    plain = f"{marker}{_annotate(model, details, default)}"
+def _assemble_row(segments: list, max_columns: int) -> str:
+    """Join ``(text, *sgr)`` segments, truncating to ``max_columns`` visible columns.
 
-    # No color (or NO_COLOR), or the row needs truncating: keep the safe reverse-video
-    # rendering, which only ever wraps already-measured plain text.
-    if not _color_enabled(sys.stderr) or len(plain) > max(columns - 1, 1):
-        line = _fit_terminal_line(plain, columns)
+    Truncation is ANSI-aware: each (possibly partial) segment is painted on its own and
+    closed with a reset, so a clipped row never leaves a color bleeding into the rest of
+    the screen. ``_paint`` returns plain text when color is off, so this also produces a
+    correct uncolored row.
+    """
+    visible = sum(len(text) for text, *_ in segments)
+    if visible <= max_columns:
+        return "".join(_paint(text, *sgr) if sgr else text for text, *sgr in segments)
+    ellipsis = "..." if max_columns > 3 else ""
+    budget = max(max_columns - len(ellipsis), 0)
+    pieces, used = [], 0
+    for text, *sgr in segments:
+        if used >= budget:
+            break
+        take = text[: budget - used]
+        if take:
+            pieces.append(_paint(take, *sgr) if sgr else take)
+            used += len(take)
+    pieces.append(_paint(ellipsis, "dim") if ellipsis else ellipsis)
+    return "".join(pieces)
+
+
+def _format_menu_row(model: str, details: dict, default: str | None, selected: bool, columns: int) -> str:
+    # Without color, keep the reverse-video highlight as the selection cue (truncating the
+    # already-measured plain text). _assemble_row can't express reverse video per segment.
+    if not _color_enabled(sys.stderr):
+        marker = "❯ " if selected else "  "
+        line = _fit_terminal_line(f"{marker}{_annotate(model, details, default)}", columns)
         return f"\x1b[7m{line}\x1b[0m" if selected else line
 
-    # Styled: the plain row fits, so painting segments (same visible width) is safe.
-    # Each property gets a consistent color so the menu reads column by column.
+    # Build the row as colored segments — each property its own color so the menu reads
+    # column by column — then assemble with truncation that preserves the coloring.
     detail = details.get(model, {})
-    pointer = _paint("❯ ", "cyan", "bold") if selected else "  "
-    name = _paint(model, "cyan", "bold") if selected else _paint(model, _vendor_color(model))
+    if selected:
+        segments = [("❯ ", "cyan", "bold"), (model, "cyan", "bold")]
+    else:
+        segments = [("  ",), (model, _vendor_color(model))]
 
     props = []
     if detail.get("arch"):
-        props.append(_paint(detail["arch"], "38;5;109"))  # steel blue
+        props.append((detail["arch"], "38;5;109"))  # steel blue
     if detail.get("quant"):
-        props.append(_paint(detail["quant"], "38;5;173"))  # copper
-    meta = f"{_paint('  [', 'dim')}{_paint(' · ', 'dim').join(props)}{_paint(']', 'dim')}" if props else ""
+        props.append((detail["quant"], "38;5;173"))  # copper
+    if props:
+        segments.append(("  [", "dim"))
+        for index, prop in enumerate(props):
+            if index:
+                segments.append((" · ", "dim"))
+            segments.append(prop)
+        segments.append(("]", "dim"))
 
     marks = []
     if detail.get("state") == "loaded":
-        marks.append(_paint("loaded", "green"))
+        marks.append(("loaded", "green"))
     if model == default:
-        marks.append(_paint("default", "yellow"))
-    tail = f"{_paint('  (', 'dim')}{_paint(', ', 'dim').join(marks)}{_paint(')', 'dim')}" if marks else ""
-    return f"{pointer}{name}{meta}{tail}"
+        marks.append(("default", "yellow"))
+    if marks:
+        segments.append(("  (", "dim"))
+        for index, mark in enumerate(marks):
+            if index:
+                segments.append((", ", "dim"))
+            segments.append(mark)
+        segments.append((")", "dim"))
+
+    return _assemble_row(segments, max(columns - 1, 1))
 
 
 def _rewrite_menu_row(out, row: int, rows: int, body: str) -> None:
@@ -402,8 +440,8 @@ def _render_menu(out, models, details, default, selected, redraw) -> int:
     if redraw:
         _clear_menu(out, rows)
     columns = _terminal_columns()
-    if _color_enabled(sys.stderr) and len(_PICKER_HEADER) <= max(columns - 1, 1):
-        header = _paint(_PICKER_TITLE, "bold") + _paint(_PICKER_HINT, "dim")
+    if _color_enabled(sys.stderr):
+        header = _assemble_row([(_PICKER_TITLE, "bold"), (_PICKER_HINT, "dim")], max(columns - 1, 1))
     else:
         header = _fit_terminal_line(_PICKER_HEADER, columns)
     out.write(f"\r\x1b[2K{header}\n")
