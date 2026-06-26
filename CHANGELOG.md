@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.5.0]
+
 ### Changed
 
 - The interactive `--pick` menu is colorized, with each property its own color so the list
@@ -121,7 +123,8 @@ mis-numbered as a patch — are folded in here under a proper MINOR bump.)
 - Standalone `claude-lms-proxy` console script.
 - Packaging: PyPI metadata, a Homebrew formula, and GitHub Actions CI.
 
-[Unreleased]: https://github.com/WillieCubed/claude-lms/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/WillieCubed/claude-lms/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/WillieCubed/claude-lms/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/WillieCubed/claude-lms/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/WillieCubed/claude-lms/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/WillieCubed/claude-lms/compare/v0.1.2...v0.2.0
