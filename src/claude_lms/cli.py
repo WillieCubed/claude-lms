@@ -143,7 +143,7 @@ def warm_up_model(base_url: str, model: str, notify) -> bool:
                 "stream": False,
             },
         )
-    except (urllib.error.URLError, OSError, ValueError, TimeoutError) as exc:
+    except (OSError, ValueError) as exc:  # OSError covers URLError and socket timeouts
         notify(f"cll: could not preload {model} ({exc}); LM Studio will load it on first use.")
         return False
     return True
